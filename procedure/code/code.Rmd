@@ -1,0 +1,1861 @@
+---
+title: "Flow Data Organization"
+author: "Kyle Chezik"
+date: "June 24, 2015"
+output: pdf_document
+---
+
+####Code block 0 - Functions
+```{r}
+#' Simplify data and add climate index values.
+#' This function allows you to summarize climate data into a single index values across variables. It requires the zero_one() function.
+#' @param df Requires a list with nested response variables with a further nested dataframe of model output. This dataframe must contain 7 initial columns of model results with all subsequent columns containing climate data.
+#' @param response Requires a character object referencing one of the nested response variables in df.
+
+arrange.data = function(df, response){
+	tp = df[[grep(response, names(df))]]$real_slopes
+	#tp = tp %>% select(8:ncol(tp)) %>% apply(.,2,function(x) zero_one(x)) %>%
+	#	apply(.,1,function(x) sum(x)) %>% mutate(tp, std.clim = .)
+	names(tp)[grep(response,names(tp))] = "resp"
+	tp %>% mutate(sqrt.resp = sqrt(resp)) %>% mutate(se.upper = slope+se, se.lower = slope-se) %>% arrange(resp)
+}
+
+#' Draw x and y axis.
+#'
+#' This function allows you to draw the x and y axis'.
+#' @param LW Requires a numeric that defines the line width.
+#' @param ALS Requires a numeric that defines the axis line size.
+#' @param ALY Requires a character object that defines the y-axis label.
+#' @param LL Requires a numeric that defines the margin line where the x-axis label will be drawn.
+#' @param YLim Requires a numeric vector for the location of tick mark labels. These values are output from axis.Fun().
+#' @param YLab Require a character vector fo the labels of tick mark labels. These values are output from axis.Fun().
+#' @param xAxis Requires a boolean T/F and determines whether the x-axis is drawn. xAxis defaults to False.
+
+
+axis.Draw = function(LW, ALS, ALY, LL, YLim, YLab, xAxis = F, ALabS=ALS){
+	if(xAxis == T){
+		axis(1, lwd = LW, cex.axis = ALS+0.2, outer = T, hadj = 1,
+				 labels = c("0","10000","40000","90000","160000","250000"), at = c(0,100,200,300,400,500))
+		mtext(expression("Area (km"^2*")"), side = 1, line = LL, cex = ALabS) # x-axis label.
+	} else axis(1, lwd = LW, tick = TRUE, labels = FALSE, tck = 0)
+	axis(2, lwd = LW, cex.axis = ALS+0.2, at = YLim, labels = YLab, las = 1)
+	mtext(ALY, side=2, line=LL, cex = ALS, las = 0)  #y-axis label.
+}
+
+#' Y-Axis Labels
+#'
+#' Manually or automatically define readable y-axis labels for logit transformed day of year (DOY) trend variables or log transformed trend variables.
+#' @param df Requires a list with a nested dataframe of model results.
+#' @param yaxis.DOY Requires a boolean T/F. This argument refers to whether or not the y-axis is logit transformed DOY or not. It defaults to False.
+#' @param ylimit Allows the user to override estimates and force the bounds of the y-axis.
+
+
+axis.Fun = function(df, yaxis.DOY=F, ylimit=NULL){
+	if(yaxis.DOY == T) {
+		ylimits <<- pretty(c(min(df$slope), max(df$slope)))
+		label <<- round((ylimits/4*38*365)/3.8,0)
+	} else {
+		ylimits <<- pretty(c(min(df$se.lower), max(df$se.upper)))
+		label <<- round(exp(ylimits*10)*100-100,0)
+	}
+	if(is.null(ylimit)==F){
+		ylimits <<- pretty(ylimit)
+		label <<- round(exp(ylimits*10)*100-100,0)
+	}
+}
+
+#' Density Plot Axis' and Labels.
+#'
+#' This function allows you to draw the density plot axis' and labels.
+#' @param type Requires a character vector of "int" if plotting intercept data. Anything less (e.g., "exp") will default to plotting variance exponent data.
+#' @param ALS Requires a numeric that defines the axis line size.
+#' @param LL Requires a numeric that defines the margin line where the x-axis label will be drawn.
+#' @param LW Requires a numeric that defines the line width.
+#' @param annual Requires a T/F as to whether the data are annually summarized (T) or monthly summarized (F). Defaults to False.
+
+
+axis.density.draw = function(type, ALS, LL, LW, annual = F){
+	if(type == "int"){
+		label = round(exp(c(-0.008,-0.004,0,0.004,0.008,0.012,0.016)*10)*100-100,0)
+		axis(1, lwd = 0.5, cex.axis = ALS, outer = T, hadj = 1, labels = label, at = c(-0.008,-0.004,0,0.004,0.008,0.012,0.016))
+		mtext(expression("Intercept | %Change"%.%"Decade"^-1), side = 1, line = LL, cex = ALS)
+	} else{
+		if(annual == T){
+			mtext(expression("Var. Exp. Param. ("*delta*")"), side = 1, line = LL, cex = ALS - 0.2) # x-axis label.
+			axis(1, lwd = LW, tck = -0.04, cex.axis = ALS, outer = T)
+		} else {
+			axis(1, lwd = 0.5, cex.axis = ALS, outer = T, hadj = 0.5, labels = c("-12","-8","-4","0","4"), at = c(-12,-8,-4,0,4), cex.axis = ALS)
+			mtext(expression("Var. Exp. Param. ("*delta*")"), side = 1, line = LL, cex = ALS)
+		}
+	}
+}
+
+#' Color ramp function.
+#'
+#' This function allows you to create a scaled color ramp for a vector of data.
+#' @param df Requires a vector of data.
+#' @param pal Requires a character object designating the color pallet to apply. Here we require palletes provided by RColorBrewer and default ot a Green Blue gradient pallet.
+#' @param shade Requires a character object between 0 and 100. The lower the value the greater the transparency. Default is "99".
+
+
+color.gradient = function(vec, pal = "GnBu", shade = "99",monthly = F, min = NA, max = NA){
+	library(RColorBrewer)
+	#vector scaled 0-1 for function
+	if(monthly == T){
+		col = ((vec-min))/(diff(c(min,max)))
+	} else col = zero_one(vec)
+	#color ramp function
+	gradient = brewer.pal(9, pal)[3:9]
+	FUN = colorRamp(gradient, bias=1)
+	#apply function
+	cols = FUN(col)
+	cols = rgb(cols, maxColorValue=256)
+	if(as.numeric(shade)<100) paste(cols, shade, sep = "")
+}
+
+#' Gather and Arrange Density Plot Data
+#'
+#' Gather and arrange observed and simulated variance and intercept parameter estimates.
+#' @param df Requires a list with nested response variables with a further nested dataframe of model output.
+#' @param response Requires a character object referencing one of the nested response variables in df.
+#' @param type Requires a character vector of "int" if plotting intercept data. Anything less (e.g., "exp") will default to plotting variance exponent data.
+
+gather.density.data = function(df, response, type){
+	tp = df[[grep(response, names(df))]]
+	Rvarexp = tp$real_varexp$varexp
+	Svarexp = tp$sim_varexp$varexp
+	Rint = tp$real_varexp$intercept
+	Sint = tp$sim_varexp$intercept
+
+	if(type == "int"){
+		d <<- density(Sint)
+		var.real <<- Rint}
+	else{d <<- density(Svarexp)
+	var.real <<- Rvarexp}
+	varR <<- Rvarexp
+	varS <<- Svarexp
+}
+
+#' Draw Simulation Lines
+#'
+#' This function allows you to add simulation lines to plotting region.
+#' @param df A dataframe containing a column of variance exponent parameters.
+#' @param col A character object defining the colour of the lines.
+#' @param LW A numeric object defining the width of each variance line.
+#' @param shade Requires a character object between 0 and 100. The lower the value the greater the transparency. Default is "10".
+#' @param transp A on/off (T/F) switch for making the lines transparent.
+#' @param intercept Requires a numeric object with the observed intercept.
+#' @param slope Requires a numeric object with the observed slope.
+#' @param resp.sqrt Requires a numeric object with the observed response variables. This variable (resp.sqrt) was added by arrange.data().
+#' @param sigma Requires a numeric object with the observed sigma.
+
+
+line.sims = function(df, col, LW, shade = "10", transp = T, intercept, slope, resp.sqrt, sigma){
+	apply(df,1,function(y){
+		if(transp == T) colur = paste(col,shade,sep="")
+		else colur = col
+		upper = intercept + slope*(resp.sqrt - mean(resp.sqrt)) + 1.96 * sqrt(sigma^2 * exp(2*(resp.sqrt/1e3)*y[1]))
+		lines(resp.sqrt, upper, col = colur, lwd = LW)
+		lower = intercept + slope*(resp.sqrt - mean(resp.sqrt)) - 1.96 * sqrt(sigma^2 * exp(2*(resp.sqrt/1e3)*y[1]))
+		lines(resp.sqrt, lower, col = colur, lwd = LW)
+	})}
+
+#' Plot Density Plots
+#'
+#' Plot proportional plots of the variance parameter depicting the simulated values greather than and less than the observed.
+#' @param df Requires a dataframe with model simulation results. Must have a column of "var".
+#' @param type Requires a character vector of "int" if plotting intercept data. Anything less (e.g., "exp") will default to plotting variance exponent data.
+#' @param varR Observed numeric value of the variance exponent. Output generated from gather_density_data().
+#' @param varS Simulated numeric values of the variance exponent. Output generated from gather_density_data().
+#' @param annual Requires a T/F as to whether the data are annually summarized (T) or monthly summarized (F). Defaults to False.
+#' @param col1 Polygon color (character HEX) of simulated variance exponent parameters that are less extreme than the observed.
+#' @param col1 Line color (character HEX) of real variance exponent parameter.
+#' @param col3 Polygon color (character HEX) of simulated variance exponent parameters that are more extreme than the observed.
+#' @param col4 Outline color  (character HEX) of simulated variance exponent parameters that are more extreme than the observed.
+#' @param shade Requires a character object between 0 and 100. The lower the value the greater the transparency. Default is "99".
+
+	plygnPrptns = function(df, type, varR, varS, annual = F, col1="#F2AD00", col2 = "#67A9CF", col3="#F98400", col4="#FF0000", shade = "99"){
+	if(type != "int"){
+		Upper = filter(df, var>varR) %>% bind_rows(., data.frame(var = varR, dens = 0))
+		Lower = filter(df, var<varR) %>% bind_rows(., data.frame(var = varR, dens = 0))
+		if(is.null(Upper)==F & nrow(Upper)>1)	polygon(Upper$var,Upper$dens,
+																									col=paste(col1,shade,sep=""),
+																									border=paste(col1,shade,sep=""))
+		if(is.null(Upper)==F & nrow(Lower)>1) polygon(Lower$var,Lower$dens,
+																									col=paste(col3,shade,sep=""),
+																									border=paste(col4,shade,sep=""))
+		prop = round(sum(varR<varS)/length(varS),2)
+		if(annual == T) {
+			text(2,max(df$dens)/2,
+					 labels = as.character(prop), cex = 0.8)
+			text(-8.25,max(df$dens)/2,
+					 labels = as.character(round(1-prop,2)), cex = 0.8)
+		} else mtext(prop, side = 3, adj = 0.05, line = -1.3, cex = 0.5)
+	}
+}
+
+#' Add Points and Standard Errors
+#'
+#' This function allows you to add points and SE lines to plotting region.
+#' @param df Requires a dataframe with slope (slope), standard error (se) and sqrt reponse variable (sqrt.resp) columns. The sqrt.resp variable column should be produced by the arrange.data() function.
+#' @param lcol Requires a character object defining the color of the lines. The default is grey.
+#' @param cols Requires a character vector of either 1 or the same length as the number of plot points. These values should be output from the color.gradient() function.
+#' @param LW Requires a numeric value that defines the line width of the SE segments.
+#' @param shade Requires a character object between 0 and 100. The lower the value the greater the transparency. Default is "99".
+
+
+pointsSE = function(df, lcol ="#969696", cols, LW, shade = "99", ptsize = 1){
+	segments(df$sqrt.resp, df$slope+df$se, df$sqrt.resp, df$slope-df$se,
+					 col = paste(lcol, shade, sep = ""), lwd = LW)
+	segments(0,0,500,0, lty = 2, lwd = LW)
+	points(df$sqrt.resp, df$slope, col = cols, pch = 16, cex = ptsize)
+}
+
+#' Break Up Canvas
+#'
+#' This function allows you to break up the screen canvas into two columns of twelve for density plots and a column of 4 rows for representitive seasonal funnel plots.
+#' @param empty No arguments required.
+
+
+monthlyScreen = function(IntExp = 4, Atten = 5){layout(cbind(matrix(data = c(1:12), nrow = 12, ncol = IntExp),matrix(data = c(13:24), nrow = 12, ncol = IntExp),matrix(c(rep(25,3),rep(26,3),rep(27,3),rep(28,3)), nrow = 12, ncol = Atten)))}
+
+#' Break Up Canvas
+#'
+#' This function allows you to break up the screen canvas into 2 columns of 2 for funnel plots and a column of 4 rows for density plots.
+#' @param empty No arguments required.
+
+
+annualScreen = function(){layout(rbind(c(1,1,3,3,2),c(1,1,3,3,4),c(5,5,7,7,6),c(5,5,7,7,8)))}
+
+#' 0 to 1 scaling function.
+#'
+#' This function allows you to scale data between 0 and 1.
+#' @param x Requires a vector of data.
+
+zero_one = function(x) ((x-min(x)))/(diff(range(x)))
+```
+
+####Code block 1a - Data Organization
+
+###Load Original Raw Data.
+```{r, message=FALSE, cache=TRUE, include=FALSE}
+#Load in libraries.
+library(plyr);library(tidyverse);library(MARSS);library(zoo);library(lubridate)
+```
+
+###Subset and Constrain Data
+```{r, echo=FALSE, message=F, dependson=1}
+load("01_Data-Flow-Orig.RData")
+# Remove Dam Influenced Sites.
+Flow.2 = filter(Flow.2, !(Station.ID %in% c("08JC001","08JC002","08ME002")))
+
+#Limit the HYDAT flow data to years between 1970 and 2007.
+Data = Flow.2 %>% filter(year(Date)>=1970, year(Date)<=2007)
+
+#Split up the date for processesing.
+Data = Data %>% mutate(Year = year(Date), nMonth = month(Date), Month = month(Date, label = T), Day = day(Date), DOY = yday(Date))
+
+#Determine the number of days missing in each month of each year by flow gauge station (DIMM = Days In Month Missing). Remove months with more then 5 days missing.
+DIMM = Data %>% group_by(Station.ID, Year, Month) %>%
+	summarize(Days.Missing = unique(days_in_month(Date)-n())) %>%
+	filter(Days.Missing<=5) %>% ungroup()
+
+#Determine the number of months in each year for each flow gauge site. Remove years with fewer than 12 months.
+DIM.Limited.Months = DIMM %>% group_by(Station.ID, Year) %>%
+	summarize(Months = n()) %>% filter(Months == 12)
+
+#Isolate data with Years that have 12 months in which no month is missing more than 5 days.
+Data = plyr::match_df(Data,DIM.Limited.Months,on = c("Station.ID","Year"))
+
+#Determine the number of years included in each site. Remove stations with fewer than 35 years of data.
+Stations.Final = DIM.Limited.Months %>% summarise(Years = n()) %>%
+	filter(Years>=35)
+
+#Isolate data such that all included sites have at least 35 of the possible 38 years between 1970 and 2007, and each year has 12 full months where each month is missing no more than five days.
+Data = plyr::match_df(Data,Stations.Final,on = "Station.ID")
+save(Data,file = "02a_Data_Clean.RData")
+```
+
+###Interpolate Missing Data
+```{r,echo=F,message=F, dependson=1}
+#Fill in missing data for the 'day of year' analysis.
+load("02a_Data_Clean.RData") #Load processesed data.
+
+#Split up the date for processesing.
+Data = Data %>% mutate(Year = year(Date), nMonth = month(Date), Month = month(Date, label = T), Day = day(Date), DOY = yday(Date))
+
+#Determine the number of missing days in each Station, Year, Month combination. Retain those that have more than 0.
+Missing = Data %>% group_by(Station.ID, Year, nMonth) %>%
+	summarize(Days.Missing = unique(days_in_month(Date)-n())) %>%
+	filter(Days.Missing > 0)
+
+library(doParallel)
+registerDoParallel(cores = 7)
+#Create a list for each station and year combination where a month is missing data. These lists include data for the year prior and after the year in which data is missing. This creates a vector/dataset in the wide format which is necessary for the auto-regressive state-space model.
+Sites = plyr::dlply(Missing,c("Station.ID","Year"),function(x){
+	#browser()
+	Period = seq(unique(x$Year)-1,unique(x$Year+1))
+	Site = subset(Data, Station.ID==x$Station.ID & Year%in%Period)
+	Potential.Dates = seq(as.Date(paste(Period[1],"-01-01",sep="")), as.Date(paste(Period[3],"-12-31",sep="")), by = "day")
+	Date.Rule = data.frame(Station.ID = rep(unique(x$Station.ID),length(Potential.Dates)),Date = Potential.Dates)
+	Site.Missing = full_join(Site, Date.Rule, by = c("Date","Station.ID"))
+	Site = spread(Site.Missing[,c(1:3)],Date,Flow.Data)[1,]
+	as.numeric(as.vector(Site[,c(2:ncol(Site))]))
+})
+
+pdf("interpolation-checks-approx.pdf", width = 9, height = 6)
+par(mfrow = c(3, 3), mar = c(3, 3, 1, 1), cex = 0.5)
+plyr::l_ply(Sites, function(i) {
+	ind <- seq_along(i)
+	d <- data.frame(flow = i, ind = ind)
+	d$approx <- approx(d$ind[!is.na(d$flow)], y = log(d$flow[!is.na(d$flow)]),
+		xout = d$ind)$y %>% exp()
+  plot(d$ind, d$flow, type = "o", pch = 20, cex = 0.6)
+  # lines(d$ind, d$approx, col = "blue")
+  pred_nas <- d[which(is.na(d$flow)), c("ind", "approx")]
+  points(pred_nas$ind, pred_nas$approx, col = "red", cex = 1, pch = 20)
+})
+dev.off()
+
+# Interpolate the missing values via a linear interpolation (in log space):
+Preds = plyr::ldply(names(Sites),function(x){
+	Year = as.numeric(strsplit(x,split = "\\.")[[1]][2])
+	Site = strsplit(x,split = "\\.")[[1]][1]
+	Potential.Dates = seq(as.Date(paste(Year-1,"-01-01",sep="")), as.Date(paste(Year+1,"-12-31",sep="")), by = "day")
+	x.Dates = Data[which(Data$Station.ID==Site & Data$Year==Year),"Date"]
+	rows = which(Potential.Dates%in%x.Dates==F & as.numeric(format(Potential.Dates,"%Y"))==Year)
+
+	ind <- seq_along(Sites[[x]])
+	d <- data.frame(flow = Sites[[x]], ind = ind)
+	d$approx <- approx(d$ind[!is.na(d$flow)], y = log(d$flow[!is.na(d$flow)]),
+		xout = d$ind)$y %>% exp()
+	d <- d[rows, ]
+
+	data.frame(Station.ID = rep(Site,length(rows)),
+		Date = Potential.Dates[rows],
+		Flow.Data = d$approx)
+})
+
+#Split up the date for processesing.
+Preds = Preds %>% mutate(Year = year(Date), nMonth = month(Date), Month = month(Date, label = T), Day = day(Date), DOY = yday(Date))
+
+Data.Preds = bind_rows(Data, Preds)
+save(Data.Preds, file = "02b_Missing_Data_Predictions.RData")
+```
+
+###Create Annual Dataset
+```{r,echo=F,message=F,dependson=1}
+#Load Data
+load("01_Data-Wtshd-Orig.RData"); names(WS.2) = c("Station.ID","Lat","Long","Area")
+load("02b_Missing_Data_Predictions.RData")
+
+#Calculate Rolling Average to smooth out daily extremes.
+flow.stats = Data.Preds %>% group_by(Station.ID) %>%
+	arrange(Date) %>%
+	do({
+		z = zoo(.$Flow.Data, .$Date)
+		x = rollapply(data = z, width = 5, by = 1, FUN = mean)
+		data.frame(Date = index(x), mean5day = coredata(x))
+	})
+
+#Summarise annual data by the day of year to half annual flow.
+# Get the row numbers of when cumulative flow volume hits half the total yearly volume:
+accum_flow <- Data.Preds %>% left_join(., flow.stats, by  = c("Station.ID", "Date")) %>%
+	mutate(row_number = 1:length(Year)) %>%
+	group_by(Station.ID, Year) %>%
+	mutate(half_total_flow = sum(Flow.Data) / 2) %>%
+	summarise(row_number = max(row_number[cumsum(Flow.Data) < half_total_flow])) %>%
+	as.data.frame()
+# Select those rows:
+accum_flow <- Data.Preds[accum_flow$row_number, ] %>%
+	inner_join(accum_flow) %>%
+	select(-row_number)
+
+# Summarize flow data.
+flow.stats = left_join(Data.Preds, flow.stats, by = c("Station.ID","Date")) %>%
+	group_by(Station.ID, Year) %>%
+	summarise(Median.F = median(Flow.Data),
+									 Min.F = min(mean5day, na.rm = T),
+									 Max.F = max(mean5day, na.rm = T))
+
+Y.Data = left_join(accum_flow, flow.stats, by = c("Station.ID","Year"))
+Y.Data = left_join(Y.Data, WS.2, by = c("Station.ID"))
+names(Y.Data)[8] = "DOY2"
+save(Y.Data,file = "03_Data_Annual.RData")
+```
+
+###Create Monthly Dataset
+```{r,echo=F,message=F,dependson=1}
+#Summarise data monthly mean, minnimum and maximums.
+load("01_Data-Wtshd-Orig.RData"); names(WS.2) = c("Station.ID","Lat","Long","Area")
+load("02b_Missing_Data_Predictions.RData")
+df = Data.Preds %>% group_by(Station.ID) %>% arrange(Date) %>%
+	do({
+		z = zoo(.$Flow.Data, .$Date)
+		x = rollapply(data = z, width = 5, by = 1, FUN = mean)
+		data.frame(Date = index(x), mean5day = coredata(x))
+	})
+
+M.Data = left_join(Data.Preds, df, by = c("Station.ID","Date")) %>%
+	mutate(flow.data_mean = if_else(is.na(.$mean5day), .$Flow.Data, .$mean5day)) %>%
+	select(-mean5day) %>%
+	group_by(Station.ID, Year, nMonth, Month) %>%
+	summarise(median.M.flow = median(flow.data_mean),
+ 						max.M.flow = max(flow.data_mean, na.rm = T),
+ 						min.M.flow = min(flow.data_mean, na.rm = T))
+#Join location and area data to flow data.
+M.Data = left_join(M.Data, WS.2, by = "Station.ID")
+save(M.Data,file = "03_Data_Monthly.RData")
+```
+
+####Code block 1b - Outlier ID
+
+What's going on with the funnels?
+
+```{r load-stuff, echo=FALSE}
+load("03_Data_Annual.RData")
+load("03_Data_Monthly.RData")
+Y.Data = plyr::mutate(Y.Data, Year.Center = Year-1969)
+Y.Data = plyr::ddply(Y.Data, "Station.ID", plyr::mutate, Med.F.sc = scale(Median.F, center = F),Max.F.sc = scale(Max.F, center = F),Min.F.sc = scale(Min.F, center = F))
+M.Data = plyr::mutate(M.Data, Year.Center = Year-1969)
+
+# this function fits slopes to real data
+fit_slopes <- function(flow.dat, response) {
+  area_dat <- unique(flow.dat[,c("Station.ID", "Area")])
+  equation <- as.formula(paste(response,"~Year.Center"))
+  models <- plyr::ddply(flow.dat,c("Station.ID"), function(x){
+    library(nlme)
+    mod <- gls(equation, correlation = corAR1(), data = x)
+    slope <- coef(mod)[[2]]
+    intercept <- coef(mod)[[1]]
+    se <- summary(mod)$tTable[2,2]
+    sigma <- mod$sigma
+    phi <- coef(mod$model[[1]], unconstrained = F)[[1]]
+    data.frame(intercept,slope,se,sigma,phi)
+})
+  models <- plyr::join(models,area_dat, by = "Station.ID")
+  models
+}
+
+# this function takes a data frame from fit_slopes() and generates a simulated
+# time series (WITHOUT SLOPE) plus a gls() fit to that simulated data
+sim_slopes <- function(slope.dat, yrs, return_ts = FALSE) {
+  out <- plyr::adply(slope.dat, 1, function(x) {
+    y <- as.numeric(arima.sim(n = length(yrs),
+        model = list(order = c(1, 0, 0), ar = x$phi),
+        mean = 0, sd = x$sigma)) + x$intercept
+    mod_sim <- gls(y~yrs, correlation = corAR1())
+    slope_sim <- coef(mod_sim)[[2]]
+    se_sim <- summary(mod_sim)$tTable[2,2]
+    if (!return_ts) {
+      data.frame(slope_sim, se_sim)
+    } else {
+      data.frame(y, yrs)
+    }
+  })
+  if (return_ts) out <- out[,c("Station.ID", "yrs", "y")]
+  out
+}
+
+# this function fits a gls model with a variance structure for the residual
+# error
+# slopes and area are both vectors
+fit_var <- function(slopes, area) {
+  scale_factor <- sd(slopes)
+  # scale_factor <- 1
+  scaled_slope <- slopes / scale_factor
+  m <- gls(scaled_slope~1, weights = varExp(form= ~sqrt(area)/1e4))
+  varexp <- m$model[[1]][[1]]
+  sigma <- m$sigma * scale_factor
+  intercept <- coef(m)[[1]] * scale_factor
+  data.frame(varexp, sigma, intercept)
+}
+
+# wrapper function
+null_sim <- function(flow.dat, response, iter, capture_slopes_i = -999) {
+  yrs <- unique(flow.dat$Year.Center)
+  real_slopes <- fit_slopes(flow.dat, response)
+  example_ts <- sim_slopes(slope.dat = real_slopes, yrs = yrs,
+    return_ts = TRUE)
+  sim_varexp <- plyr::ldply(seq_len(iter), function(i) {
+    simulated_slopes <- sim_slopes(slope.dat = real_slopes, yrs = yrs)
+    if (i %in% capture_slopes_i) {
+    	saveRDS(simulated_slopes, file = paste0("sim-slopes-", response, "-", i, ".rds"))
+    }
+    out <- fit_var(simulated_slopes$slope_sim, area = simulated_slopes$Area)
+    out$.n <- i
+    out
+  })
+  real_varexp <- fit_var(real_slopes$slope, area = real_slopes$Area)
+  list(real_varexp = real_varexp, real_slopes = real_slopes,
+    sim_varexp = sim_varexp, example_ts = example_ts)
+}
+```
+
+```{r run-stuff, cache=TRUE}
+set.seed(1)
+out_min <- null_sim(Y.Data, "Min.F.sc", iter = 9, capture_slopes_i = 1:9)
+out_med <- null_sim(Y.Data, "Med.F.sc", iter = 9, capture_slopes_i = 1:9)
+```
+
+```{r, fig.width=11, fig.height=11, cache=TRUE}
+library(ggplot2)
+# real:
+ggplot(Y.Data, aes(Year.Center, Min.F.sc)) + geom_line() +
+	facet_wrap(~Station.ID, scales = "free_y")
+ggplot(Y.Data, aes(Year.Center, Med.F.sc)) + geom_line() +
+	facet_wrap(~Station.ID, scales = "free_y")
+```
+
+Plot some replicates:
+
+```{r}
+
+# intercept_real + 1.96 * sqrt(sigma_real^2 * exp(2*sqrt(models$Area)*x$varexp))
+check_funnels <- function(response, sim_var_df) {
+	par(mfrow = c(3, 3), cex = 0.7, mar = c(2, 2, 1, 1))
+	for(i in 1:9) {
+		x <- readRDS(paste0("sim-slopes-", response, "-", i, ".rds"))
+		a <- seq(sqrt(min(x$Area)), sqrt(max(x$Area)), length.out = 50L) / 1e4
+		xx <- sim_var_df[i,]
+		u <- xx$intercept + 1.96 * sqrt(xx$sigma^2 * exp(2*a*xx$varexp))
+		l <- xx$intercept - 1.96 * sqrt(xx$sigma^2 * exp(2*a*xx$varexp))
+		plot(sqrt(x$Area), x$slope_sim, ylim = range(c(l, u, x$slope_sim)), type = "n")
+		x$.n <- 1:nrow(x)
+		text(sqrt(x$Area), x$slope_sim, labels = x$.n)
+		lines(a * 1e4, u)
+		lines(a * 1e4, l)
+		mtext(i)
+	}
+}
+check_funnels("Med.F.sc", out_med$sim_varexp)
+check_funnels("Min.F.sc", out_min$sim_varexp)
+```
+
+#This doesn't look quite as extreme as in your plots, Kyle, but 1 out of 9 is expanding with area.
+
+#Here's an example culprit:
+
+```{r}
+x <- readRDS(paste0("sim-slopes-", "Med.F.sc", "-", 6, ".rds"))
+x[c(2, 3, 10, 34),]
+```
+
+#Look at those huge sigmas and phis for rows 2 and 3 compared to 10 and 34 (typical sites).
+
+#And here's what it can create:
+
+```{r}
+x$.n <- 1:nrow(x)
+plot(sqrt(x$Area), x$slope_sim, type = "n")
+text(sqrt(x$Area), x$slope_sim, labels = x$.n)
+```
+
+#A log Area axis helps show what the model sees:
+
+```{r}
+# log axis:
+plot(log(x$Area), x$slope_sim, type = "n")
+text(log(x$Area), x$slope_sim, labels = x$.n)
+```
+
+#These are some underlying real time series causing this:
+
+```{r}
+library(ggplot2)
+q <- subset(Y.Data, Station.ID %in% c("08JC002", "08JC001"))
+ggplot(q, aes(Year.Center, Med.F.sc)) + geom_line() +
+	facet_wrap(~Station.ID, scales = "free_y")
+```
+
+#So it's the area-sigma-phi relationship that's causing this.
+
+#For min flow, big sites have low variability and little autocorrelation:
+
+```{r}
+ggplot(out_min$real_slopes, aes(log(Area), sigma, size = phi)) + geom_point() +
+	ggtitle("Minimum flow")
+```
+
+#For median flow, there are a few moderately big sites that have high variability and fairly high autocorrelation:
+
+```{r}
+ggplot(out_med$real_slopes, aes(log(Area), sigma, size = phi)) + geom_point() +
+		ggtitle("Median flow")
+```
+
+#It's those same two sites:
+
+```{r}
+subset(out_med$real_slopes, log(Area) > 10 & sigma > 0.35)
+```
+
+#The other sorta culprit is the 3rd one here:
+
+```{r}
+subset(out_med$real_slopes, log(Area) > 9 & sigma > 0.35)
+```
+
+####Code block 2 - Climate Portfolio
+
+#### Pre BC_Climate Tool
+
+
+#Output a shapefile grid to predict climate data on after having clipped the grid by the Fraser Basin.
+```{r}
+setwd("~/sfuvault/Simon_Fraser_University/PhD_Research/Projects/Data/Original_Data/GIS_Data/BC_Climate_Data/Point_Grid")
+WGS84 = crs("+init=epsg:4326"); BCAlbers = crs("+init=epsg:3005") #Coordinate reference systems.
+```
+
+#Create a raster defined by an extent where grid points are seperated by 100m.
+```{r}
+ras = raster(ext = extent(881827, 1553827, 434750, 1242550), crs = BCAlbers, resolution = c(1000,1000), vals = 1)
+```
+
+#Transform to points and from WGS84 to Albers BC.
+```{r}
+grid = rasterToPoints(ras,spatial = T)
+grid = spTransform(x = grid, CRSobj = WGS84)
+```
+
+#Add necessary columns for climate analysis.
+```{r}
+grid$ID1 = c(1:nrow(grid))
+grid$ID2 = c(2:(nrow(grid)+1))
+grid$lat = coordinates(obj = grid)[,2]
+grid$long = coordinates(obj = grid)[,1]
+grid$el = NA
+grid = grid[,-1]
+```
+
+#Transform to points back to Albers BC.
+```{r}
+grid = spTransform(x = grid, CRSobj = BCAlbers)
+```
+
+#Clip grid by fraser basin.
+```{r}
+fraser = readOGR(dsn = "../FraserWtshdAnalysis", layer = "fraser", p4s = c("+init=epsg:3005"))
+grid = grid[fraser,]
+```
+
+#Extract elevation data from the clipped grid dataset.
+```{r}
+dem = raster::raster(x = "../../DEMs/BC_DEM/dem_merge/IntMerDEM.tif")
+grid$el = raster::extract(x = dem, y = grid, method = 'simple')
+grid = data.frame(grid); grid = grid %>% select(-x,-y,-optional)
+```
+
+#Divide into many files for analysis in BC_Climate.
+```{r}
+init = 1
+for(i in 1:8){
+	if(i == 8) end = nrow(grid)
+	else end = round((nrow(grid)/8)*i,0)
+	x = grid[c(init:end),]
+	write.table(x, file = paste("FS",i,".csv", sep=""), quote=F, sep=",", row.names = F)
+	init = end+1
+}
+```
+
+#### Post BC_Climate Tool
+
+################## Calculate Trends #####################
+#Set working directory.
+```{r}
+setwd("~/sfuvault/Simon_Fraser_University/PhD_Research/Projects/Data/Original_Data/GIS_Data/BC_Climate_Data/ClimateTrends/raw_data")
+```
+
+#Loop through all the climate data files.
+```{r}
+for(i in dir()){
+	#Report how long each loop takes.
+	system.time({
+
+		#Read in ClimateWNA data and select the columns of interest.
+		df = read_csv(i) %>%
+			select(Year, ID1, Latitude, Longitude, Elevation, MAT, MAP,PAS, EMT, EXT, contains("Tave"), contains("Tmax"), contains("Tmin"), contains("PPT"), contains("PAS"), -contains("_wt"),-contains("_sp"), -contains("_sm"), -contains("_at"))
+		names(df) = tolower(names(df)) #Change column headers to lower case.
+		df1 = df %>% gather(key = measure, value = value, mat:pas12) #Tranform the data from wide to long format.
+
+		#Set up clusters.
+		df2 = partition(df1, id1)
+		cluster_library(df2, "dplyr") #Load necessary libraries across cores.
+		cluster_library(df2, "tidyr") #Load necessary libraries across cores.
+		cluster_library(df2, "nlme") #Load necessary libraries across cores.
+
+		#Perfrom Analysis
+		df3 = df2 %>%
+			group_by(id1, measure) %>%
+			do({
+				tryCatch({
+					mod = gls(value~year, data = ., correlation = corAR1())
+					data.frame(slope = coef(mod)[[2]])
+				}, error = function(e){
+					data.frame(slope = NA)
+				})
+			})
+
+		#Collect analysis results from clusters and compile into a single object.
+		df4 = collect(df3)
+		browser()
+		df5 = df4 %>% spread(key = measure, value = slope)
+		df6 = df %>% select(id1, latitude, longitude, elevation) %>%
+			left_join(.,df5,by="id1") %>% distinct()%>%
+			write_csv(paste("../trends_split/",i,sep = ""))
+	})
+	rm(df,df1,df2,df3,df4,df5)
+}
+```
+
+####################################################
+
+setwd("../trends_split")
+
+
+#Gather Together all the sites trend results.
+```{r}
+df = dir() %>%
+	lapply(read_csv) %>%
+	bind_rows()
+write_rds(x = df, path = "../climate_trends.rds")
+
+df = read_rds(path  = "../climate_trends.rds") %>% data.frame()
+attr = names(df)[5:69]
+write.table(attr, "../trends/attributes.txt", row.names = F, col.names = F, quote = F)
+```
+
+#For QGIS viewing and raster creation. Remember I've multiplied the trend by 10^7 to retain the precision of the trend estimates as they are veryclose together for some variables.
+```{r}
+WGS84 = crs("+init=epsg:4326"); BCAlbers = crs("+init=epsg:3005") #Coordinate reference systems.
+coords = df[,c("longitude","latitude")]
+sp = df %>% select(emt:tmin12) %>% do(. * 10^7)
+sp = df %>% select(1:4) %>% bind_cols(., sp) %>% data.frame()
+sp = SpatialPointsDataFrame(coords = coords, data = sp, proj4string = WGS84)
+sp = spTransform(x = sp, CRSobj = BCAlbers)
+writeOGR(obj=sp, dsn="../../ClimateTrends", layer="trends", driver="ESRI Shapefile", overwrite_layer = T, morphToESRI = T)
+```
+
+
+#Produce individual pour points for each Fraser sub-watershed.
+#Three pour points need to be manually moved in Whitebox as the vector estimtes of flow path for these three sites are dissimilar enough that they will not be properly snapped to proper river. These sites are... 08KH006, 08LD001 and 08LE031.
+```{r}
+setwd("~/sfuvault/Simon_Fraser_University/PhD_Research/Projects/Data/Original_Data/GIS_Data/BC_Climate_Data/FraserWtshdAnalysis")
+sites = readOGR(dsn = "sites", layer = "05_Sites", p4s = "+init=epsg:3005", stringsAsFactors = F, drop_unsupported_fields = T)
+sites = bind_cols(data.frame(sites@data[,2]),data.frame(sites@coords))
+names(sites) = c("geolocid","utm_e","utm_n")
+
+sites %>% group_by(geolocid) %>% do({
+	coords = select(., utm_e,utm_n) %>% data.frame()
+	BCAlbers = crs("+init=epsg:3005")
+	sp = data.frame(.)
+	sp = SpatialPointsDataFrame(data = sp, coords = coords, proj4string = BCAlbers)
+	writeOGR(sp, dsn = "pour_pts", layer = sp$geolocid, driver="ESRI Shapefile", overwrite_layer = T, morphToESRI = T)
+})
+```
+
+#### After Watershed Delineation and Raster to Vector Conversion in WhiteboxGAT ####
+
+#Dissolve Polygon Features in Watersheds Shapefiles to One Single Polygon Feature.
+```{r}
+setwd("~/sfuvault/Simon_Fraser_University/PhD_Research/Projects/Data/Original_Data/GIS_Data/BC_Climate_Data/FraserWtshdAnalysis/watersheds")
+files = dir(pattern = "*.shp") %>% strsplit(x = ., split = "[.]") %>% lapply(.,function(x) x[1]) %>% unlist()
+for(i in files){
+	dat = readShapePoly(fn = i, IDvar = "FID", proj4string = crs("+init=epsg:3005"))
+	if(length(dat@polygons)!=1){
+		dat = gUnaryUnion(spgeom = dat, id = "1")
+		dat = SpatialPolygonsDataFrame(Sr = dat, data = data.frame(FID = 1))
+	}
+	#browser()
+	dat@data = dat@data %>% bind_cols(., data.frame(SITE = i)) %>% select(SITE)
+	writePolyShape(x = dat, fn = paste("../watersheds/",i,sep = ""))
+}
+```
+
+#Combine all the watershed delineations into a single shapefile.
+```{r}
+setwd("~/sfuvault/Simon_Fraser_University/PhD_Research/Projects/Data/Original_Data/GIS_Data/BC_Climate_Data/FraserWtshdAnalysis/watersheds")
+sites = dir(pattern = "*.shp") %>%
+	lapply(., function(x){
+	readShapePoly(fn = x, IDvar = "SITE", proj4string = crs("+init=epsg:3005"))
+})
+```
+
+#Combine
+```{r}
+df = sites[[1]]
+for(i in 2:length(sites)){
+	df = rbind.SpatialPolygons(df, sites[[i]])
+}
+df = as(df, "SpatialPolygonsDataFrame")
+writePolyShape(x = df, fn = "../watersheds")
+```
+
+####Code block 3a - Null Simulation ARIMA mod
+
+# test gls model and arima simulation
+# prove that they are interchangeable
+# answer: yes.
+#
+# gls() with arima residuals is interchangeable with fitted arima model
+# with same order and drift
+```{r}
+set.seed(1)
+library(forecast) # for Arima()
+library(dplyr)
+
+out <- plyr::rdply(200, function() {
+
+  y <- as.numeric(arima.sim(n = 60L, model = list(model = c(1, 0, 0),
+        ar = 0.3), sd = 0.2))
+
+  m1_arima <- Arima(y, order = c(1L, 0L, 0L), include.drift = TRUE)
+  phi_arima <- coef(m1_arima)[[1]]
+  intercept_arima <- coef(m1_arima)[[2]]
+  drift_arima <- coef(m1_arima)[[3]]
+  sigma_arima <- sqrt(m1_arima$sigma2)
+
+  m1 <- gls(y~seq_along(y), correlation = corAR1())
+  phi <- coef(m1$model[[1]], unconstrained = FALSE)[[1]]
+  sigma <- m1$sigma
+  intercept <- coef(m1)[[1]]
+  slope <- coef(m1)[[2]]
+
+  ysim <- arima.sim(n = length(y), model = list(order = c(1, 0, 0),
+      ar = phi), sd = sigma) %>% as.numeric()
+
+  m2 <- gls(ysim~seq_along(ysim), correlation = corAR1())
+  phi_sim <- coef(m2$model[[1]], unconstrained = FALSE)[[1]]
+  sigma_sim <- m2$sigma
+  intercept_sim <- coef(m2)[[1]]
+
+  data.frame(phi, sigma, phi_sim, sigma_sim, phi_arima, intercept_arima,
+    sigma_arima, drift_arima, slope, intercept)
+})
+
+out <- out %>% mutate(phi_re = (phi_sim - phi) / phi,
+  sigma_re = (sigma_sim - sigma) / sigma)
+
+par(mfrow = c(3, 2))
+hist(out$phi)
+abline(v = 0.3, col = "red")
+hist(out$sigma)
+abline(v = 0.2, col = "red")
+hist(out$phi_sim)
+abline(v = 0.3, col = "red")
+hist(out$sigma_sim)
+abline(v = 0.2, col = "red")
+hist(out$phi_re)
+abline(v = 0, col = "red")
+hist(out$sigma_re)
+abline(v = 0, col = "red")
+
+par(mfrow = c(2, 2))
+plot(out$drift_arima, out$slope)
+abline(a = 0, b = 1, col = "red")
+plot(out$intercept_arima, out$intercept)
+abline(a = 0, b = 1, col = "red")
+plot(out$phi_arima, out$phi)
+abline(a = 0, b = 1, col = "red")
+plot(out$sigma_arima, out$sigma_arima)
+abline(a = 0, b = 1, col = "red")
+```
+
+####Code block 3b - Post Analysis Null Test
+
+library(tidyverse); library(stringr);library(attenPlot)
+
+
+#Load/Organize Annual Data
+```{r}
+load("03_Data_Annual.RData")
+logit = function(p){log(p/(1-p))}
+Y.Data = Y.Data %>% group_by(Station.ID) %>% mutate(med.log.sd = scale(Median.F, center = F), max.log.sd = scale(Max.F, center = F), min.log.sd = scale(Min.F, center = F), DOY2.logit = logit(DOY2/365), Year.Center = Year-1988)
+```
+
+#Load/Orgnize Montly Data
+```{r}
+load("03_Data_Monthly.RData")
+M.Data = M.Data %>% group_by(Station.ID) %>% mutate(med.log.sd = scale(median.M.flow, center = F), max.log.sd = scale(max.M.flow, center = F), min.log.sd = scale(min.M.flow, center = F), Year.Center = Year-1988)
+```
+
+#Scaling the data by site has no impact on the results, rather it only stands to reduce the likelyhood of computational issues during model bootstraping.
+
+#Incorporate the Climate Data
+```{r}
+setwd("~/sfuvault/Simon_Fraser_University/PhD_Research/Projects/Data/Original_Data/GIS_Data/BC_Climate_Data/ClimateTrends/zonal_stats")
+vars = unlist(lapply(strsplit(dir(), "-"), function(x) x[1]))
+AnnualVars = vars[which(nchar(vars) == 3)]
+MonthlyVars = vars[which(nchar(vars) > 3 & nchar(vars)<7)]
+```
+
+#Annual
+```{r}
+for(i in AnnualVars){
+	labels = c("Station.ID","count","min","mean","max",paste(i,".sd",sep = ""),"P25","P75")
+	cDat = read_csv(paste(i,"-stats.csv", sep = ""), col_names =  labels) %>% select(1,6)
+	Y.Data = dplyr::left_join(Y.Data, cDat, by = "Station.ID")
+}
+Y.Data = Y.Data %>% ungroup(); rm(cDat, AnnualVars, i, logit, vars, labels)
+```
+
+#Monthly
+```{r}
+vars = unique(str_extract(string = MonthlyVars, pattern = "([^0-9]){3,}"))
+M.Data = lapply(vars,function(x){
+	clim = MonthlyVars[grep(pattern = x, MonthlyVars)] %>% paste(.,"-stats.csv", sep = "") %>%
+		lapply(., function(y){
+			labels = c("Station.ID","count","min","mean","max",paste(x,".sd", sep = ""),"P25","P75")
+			read_csv(y, col_names = labels) %>% select(1,6) %>% mutate(nMonth = as.numeric(str_extract(string = y, pattern = "([0-9]{2})")))
+		}) %>% bind_rows()
+		M.Data <<- left_join(M.Data, clim, by = c("Station.ID","nMonth"))
+})[[length(vars)]] %>% ungroup()
+rm(vars, MonthlyVars)
+```
+
+#Incorporate Land cover data.
+```{r}
+setwd("~/sfuvault/Simon_Fraser_University/PhD_Research/Projects/Data/Original_Data/GIS_Data/BC_Climate_Data/ClimateTrends/forest_stats")
+```
+
+#Gather Together all the sites timber harvest results.
+```{r}
+df = dir() %>%
+	lapply(.,function(x){
+		year = as.numeric(substr(x,1,4))
+		read_csv(x,col_names = c("Station.ID","count")) %>%
+			mutate(Year = year)
+	}) %>%
+	bind_rows()
+```
+
+#Convert the 100m X 100m raster count data to area of timber harvest in km^2.
+```{r}
+df = df %>% mutate(harvest = count*(0.1*0.1))
+```
+
+#Create a rolling average column to account for recent cuts.
+```{r}
+roll = plyr::ddply(df, "Station.ID", function(x){
+	c = 1; FiveHarvest = NULL
+	for(i in 1970:2007){
+		FiveHarvest[c] = x %>% filter(Year <= i, Year >= i-5) %>% .$harvest %>% sum(.)
+		c = c + 1
+	}
+	data.frame(FiveHarvest, Year = c(1970:2007))
+})
+df = df %>% filter(Year >= 1970) %>% left_join(., roll, by = c("Station.ID","Year"))
+
+
+M.Data = df %>% select(-count) %>% left_join(M.Data, ., by = c("Station.ID","Year"))
+Y.Data = df %>% select(-count) %>% left_join(Y.Data, ., by = c("Station.ID","Year"))
+M.Data = M.Data %>% mutate(pHarvest = harvest/Area, p5Harvest = FiveHarvest/Area)
+Y.Data = Y.Data %>% mutate(pHarvest = harvest/Area, p5Harvest = FiveHarvest/Area)
+M.Data = M.Data %>% group_by(Station.ID) %>% mutate(p5H_Center = scale(p5Harvest, scale=F))
+Y.Data = Y.Data %>% group_by(Station.ID) %>% mutate(p5H_Center = scale(p5Harvest, scale=F))
+rm(df)
+
+setwd("~/sfuvault/Simon_Fraser_University/PhD_Research/Projects/River-Network-Flow-Trends")
+save(Y.Data, file = "05_MonthDat_ClimForest.RData")
+save(M.Data, file = "05_AnnualDat_ClimForest.RData")
+
+load("05_MonthDat_ClimForest.RData")
+load("05_AnnualDat_ClimForest.RData")
+```
+# this function fits slopes to real data
+```{r}
+fit_slopes <- function(flow.dat, response, pred.var, vars) {
+	area_dat <- unique(flow.dat[,c("Station.ID", vars[-c(7,8)])]) #Edit
+	equation1 <- as.formula(paste(response,"~Year.Center")) #Edit
+	#equation2 <- as.formula(paste(response,"~Year.Center+p5H_Center")) #Edit
+	models <- plyr::ddply(flow.dat,"Station.ID", function(x){
+		library(nlme)
+		#if(sum(x$p5Harvest)==0) mod <- gls(equation1, correlation = corAR1(), data = x) #Edit
+		#if(sum(x$p5Harvest)!=0) mod <- gls(equation2, correlation = corAR1(), data = x) #Edit
+		mod <- gls(equation1, correlation = corAR1(), data = x) #Edit
+		slope <- coef(mod)[[2]]
+		se <- summary(mod)$tTable[2,2]
+		intercept <- coef(mod)[[1]]
+		sigma <- mod$sigma
+		phi <- coef(mod$model[[1]], unconstrained = F)[[1]]
+		data.frame(intercept,slope,se,sigma,phi)
+	})
+	models <- plyr::join(models, area_dat, by = "Station.ID")
+	models
+}
+```
+
+# this function takes a data frame from fit_slopes() and generates a simulated
+# time series (WITHOUT SLOPE) plus a gls() fit to that simulated data
+```{r}
+sim_slopes <- function(slope.dat, yrs, return_ts = FALSE){
+	out <- plyr::adply(slope.dat, 1, function(x) {
+		y <- as.numeric(arima.sim(n = length(yrs),
+															model = list(order = c(1, 0, 0), ar = x$phi),
+															mean = 0, sd = x$sigma)) + x$intercept
+		mod_sim <- gls(y~yrs, correlation = corAR1(), control = list(maxIter = 1000, msMaxIter = 1000))
+		slope_sim <- coef(mod_sim)[[2]]
+		se_sim <- summary(mod_sim)$tTable[2,2]
+		if (!return_ts) {
+			data.frame(slope_sim, se_sim)
+		} else {
+			data.frame(y, yrs)
+		}
+	})
+	if (return_ts) out <- out[,c("Station.ID", "yrs", "y")]
+	out
+}
+```
+# this function fits a gls model with a variance structure for the residual error
+# slopes and area are both vectors
+```{r}
+fit_var <- function(slopes, ind, clim) {
+	scale_factor <- var(slopes)
+	scaled_slope <- slopes / scale_factor
+	x <- sqrt(ind)
+	x <- x - mean(x) #Centered so the y-intercept is the basin wide mean response.
+	v = sqrt(ind)/sd(sqrt(ind))
+	#Climate index response variable, weighted by area and centered.
+	w = clim - mean(clim)
+		tryCatch({
+			m <- gls(scaled_slope~x, weights = varExp(form= ~sqrt(ind)/1e3),
+			#m <- gls(scaled_slope~w, weights = varExp(form= ~clim/10),
+							 control = glsControl(maxIter = 1000L, msMaxIter = 1000L))
+			varexp <- m$model[[1]][[1]]
+			sigma <- m$sigma * scale_factor
+			intercept <- coef(m)[[1]] * scale_factor
+			slope = m$coefficients[[2]] * scale_factor
+			slopePval = summary(m)[[18]][8]
+			retrn = data.frame(varexp, sigma, intercept, slope, slopePval)
+		}, .error = function(e) {
+			retrn = data.frame(varexp = NA, sigma = NA, intercept = NA, slope = NA, slopePval = NA)
+		})
+	retrn
+}
+```
+
+# wrapper function for analysis of individual predictor variables.
+```{r}
+null_sim <- function(flow.dat, response, pred.var, vars, iter, .parallel){
+  yrs <- unique(flow.dat$Year.Center)
+  real_slopes <- fit_slopes(flow.dat, response, pred.var, vars)
+  real_slopes = real_slopes %>% select(8:ncol(.)) %>% apply(., 2, function(x) zero_one(x)) %>%
+  	apply(., 1, function(x) sum(x)) %>% mutate(real_slopes, std.clim = .)
+  #Scale climate between one and zero and exponeniate to make things greater than zero.
+  real_slopes = mutate(real_slopes, index = std.clim*exp(zero_one(Area)))
+  example_ts <- sim_slopes(slope.dat = real_slopes, yrs = yrs, return_ts = TRUE)
+  sim_varexp <- plyr::ldply(seq_len(iter), function(i){
+    simulated_slopes <- sim_slopes(slope.dat = real_slopes, yrs = yrs)
+    cols = names(simulated_slopes)
+    out <- fit_var(simulated_slopes$slope_sim,
+    							 ind = simulated_slopes[,grep(pred.var, cols)],
+    							 clim = simulated_slopes[,grep("index", cols)])
+    out$.n <- i
+    out
+  },.progress = "text", .parallel = .parallel)
+  cols = names(real_slopes)
+  real_varexp <- fit_var(real_slopes$slope,
+  											 ind = real_slopes[,grep(pred.var, cols)],
+  											 clim = real_slopes[,grep("index", cols)])
+  list(real_varexp = real_varexp, real_slopes = real_slopes,
+    sim_varexp = sim_varexp, example_ts = example_ts)
+}
+```
+
+# wrapper function to run analyses across all predictor variables.
+```{r}
+iter_null_sim <- function(flow.dat, response, pred.vars, vars, iter, .parallel = FALSE){
+	sapply(pred.vars, function(x){
+		null_sim(flow.dat, response, x, vars, iter, .parallel)
+	}, simplify = F, USE.NAMES = T)
+}
+
+doParallel::registerDoParallel(cores = parallel::detectCores()-1)
+
+set.seed(123)
+vars = c("Area","emt.sd","ext.sd","map.sd","mat.sd","pas.sd","p5Harvest", "p5H_Center")
+out_doy2 <- iter_null_sim(Y.Data, "DOY2.logit", "Area", vars, 10L, T)
+out_min <- iter_null_sim(Y.Data, "log(min.log.sd)", "Area", vars, 1000L, T)
+out_max <- iter_null_sim(Y.Data, "log(max.log.sd)", "Area", vars, 1000L, T)
+out_med <- iter_null_sim(Y.Data, "log(med.log.sd)", "Area", vars, 1000L, T)
+
+stopifnot(identical(sum(is.na(out_doy2$Area$sim_varexp$varexp)), 0L))
+stopifnot(identical(sum(is.na(out_min$Area$sim_varexp$varexp)), 0L))
+stopifnot(identical(sum(is.na(out_max$Area$sim_varexp$varexp)), 0L))
+stopifnot(identical(sum(is.na(out_med$Area$sim_varexp$varexp)), 0L))
+
+save(out_doy2, file = "out_doy2.RData")
+save(out_min, file = "out_min.RData")
+save(out_max, file = "out_max.RData")
+save(out_med, file = "out_med.RData")
+
+vars = c("Area","pas.sd","ppt.sd","tave.sd","tmax.sd","tmin.sd")
+out_min_month <- plyr::dlply(M.Data, "nMonth", function(x)
+  iter_null_sim(x, "log(min.log.sd)", "Area", F, vars, iter = 1000L),
+  .parallel = TRUE, .paropts = list(.packages = "nlme"))
+save(out_min_month, file = "min_month.RData")
+
+out_max_month <- plyr::dlply(M.Data, "nMonth", function(x)
+  iter_null_sim(x, "log(max.log.sd)", "Area", F, vars, iter = 1000L),
+  .parallel = TRUE, .paropts = list(.packages = "nlme"))
+save(out_max_month, file = "max_month.RData")
+
+out_med_month <- plyr::dlply(M.Data, "nMonth", function(x)
+  iter_null_sim(x, "log(med.log.sd)", "Area", F, vars, iter = 1000L),
+  .parallel = TRUE, .paropts = list(.packages = "nlme"))
+save(out_med_month, file = "med_month.RData")
+```
+
+#look at the distribution of exponent values for Area, Climate or both.
+```{r}
+full = list()
+full[["doy2"]] = out_doy2; full[["max"]] = out_max; full[["min"]] = out_min; full[["med"]] = out_med
+full.t = plyr::ldply(full, function(i){
+	sim = i$Area$sim_varexp %>% select(varexpA, varexpC) %>% gather(.,key = "variable", value = "varexpS")
+	real = i$Area$real_varexp %>% select(varexpA, varexpC) %>% gather(.,key = "variable", value = "varexpR")
+	#sim = i$Area$sim_varexp %>% select(varexp) %>% gather(.,key = "variable", value = "varexpS")
+	#real = i$Area$real_varexp %>% select(varexp) %>% gather(.,key = "variable", value = "varexpR")
+	full = full_join(sim,real,by = "variable")
+	full
+})
+
+ggplot(full.t, aes(varexpS, color = variable)) + geom_density() + geom_vline(aes(xintercept = varexpR, color = variable)) +
+	theme_classic() + facet_wrap(~.id)
+```
+
+## look at some sample time series:
+```{r}
+p1 <- ggplot(out_med$example_ts, aes(yrs, exp(y))) + geom_line() + facet_wrap(~Station.ID, scales = "free_y")
+ggsave("sim-doy2.pdf", width = 13, height = 10)
+
+p2 <- ggplot(out_med$sim_varexp)
+
+p <- ggplot(Y.Data, aes(Year.Center, Min.F)) + geom_line() + facet_wrap(~Station.ID, scales = "free_y")
+ggsave("real-doy2.pdf", width = 13, height = 10)
+
+p <- ggplot(out_min_month[[6]]$example_ts, aes(yrs, exp(y))) + geom_line() + facet_wrap(~Station.ID, scales = "free_y")
+ggsave("sim-min-month.pdf", width = 13, height = 10)
+
+p <- ggplot(subset(M.Data, nMonth == 6), aes(Year.Center, min.M.flow)) + geom_line() + facet_wrap(~Station.ID, scales = "free_y")
+ggsave("real-min-month.pdf", width = 13, height = 10)
+```
+
+# check order of arima:
+```{r}
+aic_arima <- function(flow.dat, response) {
+  library(nlme)
+  area_dat <- unique(flow.dat[,c("Station.ID", "Area")])
+  equation <- as.formula(paste(response,"~Year.Center"))
+  arma <- expand.grid(ar = 0:2, ma = 0:1)
+  plyr::ddply(flow.dat,c("Station.ID"), function(x){
+    plyr::adply(arma, 1, function(y) {
+      ar_ <- y$ar
+      ma_ <- y$ma
+      if (ar_ > 0 & ma_ > 0) {
+        m <- gls(equation, correlation = corARMA(p = ar_, q = ma_), data = x)
+      }
+      if (ar_ > 0 & ma_ == 0) {
+        m <- gls(equation, correlation = corARMA(p = ar_), data = x)
+      }
+      if (ar_ == 0 & ma_ > 0) {
+        m <- gls(equation, correlation = corARMA(q = ma_), data = x)
+      }
+      if (ar_ == 0 & ma_ == 0) {
+        m <- gls(equation, data = x)
+      }
+      aic_out <- AICcmodavg::AICc(m)
+    data.frame(aic_out)
+    })
+  })
+}
+aic_out <- aic_arima(Y.Data, "DOY2.logit")
+aic_out %>% group_by(Station.ID) %>%
+  mutate(delta_aic = aic_out - min(aic_out)) %>%
+  ggplot(aes(paste(ar, ma), delta_aic, group = Station.ID)) + geom_line(alpha = 0.4)
+
+aic_out <- aic_arima(subset(M.Data, nMonth == 6), "log(med.log.sd)")
+aic_out %>% group_by(Station.ID) %>%
+  mutate(delta_aic = aic_out - min(aic_out)) %>%
+  ggplot(aes(paste(ar, ma), delta_aic, group = Station.ID)) + geom_line(alpha = 0.4)
+```
+
+####Code block 4 - Annual Funnel Plot
+
+################## Plot Annual Flow Trends Against Area and Display Climate Index Data ##################
+
+
+library(attenPlot) #Funnel and Density plot function library.
+
+#Density Plot Wrapper
+```{r}
+densityP = function(df, response, type = "exp", d.axis=F, LW=L.Width, ALS=Axis.Lab.Size, LL,
+										shade = "99", col1, col2, col3, col4, vline, pane){
+
+	gather.density.data(df, response, type)
+	d_dat = dplyr::tbl_df(data.frame(var = d$x, dens = d$y))
+
+	par(mar = c(0,0.3,1.5,0.5), mgp = c(2,0.60,0))
+	plot(dens~var, data = d_dat, type = "n", xlab = "", ylab = "", las = 1,
+			 bty = "n", yaxt = "n", xaxt = "n", axes = F, xaxs = "i", xlim = c(-12,5))
+
+	if(d.axis == TRUE){
+		axis.density.draw(type = type, ALS = ALS+0.2, LL = LL, LW = LW, annual = T)
+	} else axis(1, lwd = LW, labels = F, tck = 0)
+
+	plygnPrptns(d_dat, type, annual = T, varR, varS)
+
+	for(i in 1:2) abline(v = varR, col = paste(col2, shade, sep=""), lwd = vline)
+	text(4, max(d_dat$dens)-0.01, labels = pane, pos = 2, cex = ALS+0.2)
+}
+```
+
+#Funnel Plot Wrapper.
+```{r}
+funnel.wrapper = function(dat, response, yaxis.DOY = F, xAxis = T, pane, axis.Ly=NULL, d.axis = F, iter=1000){
+
+	############################################ Prepare Data ###############################################
+	#Control Panel
+	L.Width = 0.5; Axis.Lab.Size = 0.7; LabLoc = 2.1; vLine = 2.5
+	#Colour Control Panel
+	col1="#F2AD00"; col2="#67A9CF"; col3="#F98400"; col4="#FF0000"; lcol="#969696"
+	#Libraries to load.
+	library(tidyverse);library(wesanderson);library(RColorBrewer)
+	#Cleanup and arrange observed flow and climate trend data.
+	flow.trends = arrange.data(dat,response)
+	#Create a colour gradient for the climate index values.
+	cols = color.gradient(flow.trends$std.clim)
+
+	########################################### Plot Raw Data ##############################################
+	#Set initial plotting parameters
+	par(mar = c(0,3.5,0.2,0), family = "serif", bg = "white",fg = "white", mgp = c(2,0.7,0), las = 1)
+	#Determine axis labels.
+	axis.Fun(flow.trends, yaxis.DOY)
+	#Plot initial blank region to be filled.
+	plot(slope~sqrt.resp, xlim = c(0,500), ylim = range(ylimits), xlab = "", ylab = "", axes = F, data = flow.trends)
+	#Make plotting visible.
+	par(fg = "black")
+	#Draw x and y axis.
+	axis.Draw(LW = L.Width, ALS = Axis.Lab.Size, ALY = axis.Ly,
+						LL = LabLoc, YLim = ylimits, YLab = label, xAxis = xAxis)
+	#Add points and SE to Plotting Region.
+	pointsSE(flow.trends, lcol, cols, L.Width)
+	#Create Label For Each Panel.
+	text(500, max(ylimits), labels = pane, pos = 2, cex = Axis.Lab.Size+0.3)
+
+	###################################### Plot Variance Parameter #########################################
+	#Add real/simulation variance lines.
+		#Subset simulation and real data trend datasets to be used as inputs.
+	sims = dat$Area$sim_varexp
+	real = dat$Area$real_varexp
+	Rvarexp = real$varexp; sigma = real$sigma; intercept = real$intercept; slope = real$slope
+		#Sample simulation lines to be plotted and break them into those above and below the real variance param.
+	sim.lines = sample_n(sims, iter) %>% plyr::arrange(.,.n)
+	ld.up = filter(sim.lines, varexp > Rvarexp);	ld.low = filter(sim.lines, varexp < Rvarexp)
+		#Draw lines.
+			#Less extreme values.
+	line.sims(df = ld.up, col = col1, LW = L.Width, shade = "10",
+						intercept = intercept, slope = slope, sigma = sigma,
+						resp.sqrt = flow.trends$sqrt.resp)
+			#More extreme values.
+	line.sims(df = ld.low, col = col3, LW = L.Width, shade = "10",
+						intercept = intercept, slope = slope, sigma = sigma,
+						resp.sqrt = flow.trends$sqrt.resp)
+			#Actual values repeated twice.
+	for(i in c(1:2)) {
+		line.sims(df = real, col = col2, LW = L.Width + 2.5, shade = "99",
+							intercept = intercept, slope = slope, sigma = sigma,
+							resp.sqrt = flow.trends$sqrt.resp)
+	}
+
+	######################################## Density Plot ##################################################
+	densityP(df = dat, response = response, d.axis = d.axis, LW = L.Width, ALS = Axis.Lab.Size, LL = LabLoc, vline = vLine, col2 = col2, pane = pane)
+}
+
+load("out_doy2.RData")
+load("out_min.RData")
+load("out_max.RData")
+load("out_med.RData")
+
+pdf("Fig3_Annual-Funnel.pdf", width = 7, height = 4.25)
+annualScreen()
+par(oma = c(3,0,0,0))
+funnel.wrapper(out_doy2, "Area", pane = "a", xAxis = F, yaxis.DOY = T,  
+							 axis.Ly = expression("DOY"~scriptstyle(frac(1,2))~"Annual Flow | Days"%.%"Decade"^-1))
+funnel.wrapper(out_min, "Area", pane = "b", xAxis = F,
+							 axis.Ly = expression("Minimum-Flow | %Change"%.%"Decade"^-1))
+funnel.wrapper(out_max, "Area", pane = "c",
+							 axis.Ly = expression("Maximum-Flow | %Change"%.%"Decade"^-1))
+funnel.wrapper(out_med, "Area", pane = "d", d.axis = T,
+							 axis.Ly = expression("Median-Flow | %Change"%.%"Decade"^-1))
+dev.off()
+```
+
+####Code block 5 - Monthly Plot
+
+################## Plot Monthly Flow Trends Against Area and Display Climate Index Data #################
+
+library(attenPlot)#funnel and density plot function library.
+
+#density plot wrapper
+```{r}
+density_plot = function(data, response, type, xlimit){
+
+	############################################ prepare data ###############################################
+	#libraries to load.
+	library(tidyverse);library(wesanderson);library(RColorBrewer);library(lubridate)
+	#control panel
+	l.width = 0.5; axis.lab.size = 0.7; lab.loc = 2.1; vline = 2
+	#colour control panel
+	col1 = if_else(type == "int","#000000","#f2ad00"); col2= if_else(type=="int","#525252","#67a9cf")
+	col3="#f98400"; col4="#ff0000"; lcol="#969696"; shade = "99"
+	#determine if we are plotting intercept (int) or exponent (exp) data and set boundaries accordingly.
+	if(type == "int") par(oma = c(3,1.5,0.2,0.2), mar = c(0,0,0.1,0.3), mgp = c(3,0.5,0), family = "serif")
+	else par(mar = c(0,0.3,0.1,0), family = "serif")
+	#create list of month labels to iterate through.
+	months = as.character(lubridate::month(as.numeric(names(data)), label = T)); count = 1
+
+	plyr::l_ply(data,function(x){
+
+		######## gather and arrange observed and simulated variance and intercept parameter estimates. ########
+		gather.density.data(x,response, type)
+		d_dat = dplyr::tbl_df(data.frame(var = d$x, dens = d$y))
+
+		########################################### plot raw data ##############################################
+		plot(dens~var, data = d_dat, type="l", xlab = "", ylab = "", las = 1,
+				 bty = "n", yaxt = "n", xaxt = "n", xaxs = "i", xlim = xlimit, col = col1,
+				 lwd = l.width)
+		#add month label if plotting intercept (i.e., far left on page) data.
+		if(type == "int") mtext(months[count], side=2, line = 1.35, las = 1, adj = 0, cex = axis.lab.size); count <<- count+1
+		#if plotting variance exponent parameter data, then provide proportions and polygons.
+		plygnPrptns(d_dat, type, varR, varS, annual = F, col1, col2, col3, col4)
+		#add vertical line for the real int/exp value.
+		for(i in 1:2){abline(v = var.real ,col = paste(col2,shade,sep=""), lwd = vline)}
+		#add dotted vertical line at zero.
+		abline(v = 0 ,col = paste("#000000",shade,sep=""), lwd = 1, lty = "dashed")
+		#add an x-axis line without labels
+		if(type == "int") axis(1, labels = F, tck = 0, at = c(-0.008,-0.004,0,0.004,0.008,0.012,0.016))
+		else axis(1, labels = F, tck = 0, at = c(-12,-8,-4,0,4))
+	})
+	axis.density.draw(type, axis.lab.size, lab.loc)
+}
+```
+
+#funnel plot wrapper.
+```{r}
+funnel.plots = function(dat, response, yaxis.doy = F, d.xaxis = F, pane, funnel.y = "", axis.ly = "", xaxis = F, ylimit = NULL, iter = 200, monthly = F, min = NA, max = NA){
+	library(tidyverse);library(wesanderson)
+
+	############################################ prepare data ###############################################
+	#control panel
+	l.width = 0.5; axis.lab.size = 0.7; lab.loc = 1.5; vline = 2
+	#colour control panel
+	col1="#f2ad00"; col2="#67a9cf"; col3="#f98400"; col4="#ff0000"; lcol="#969696"
+	#libraries to load.
+	library(tidyverse);library(wesanderson);library(RColorBrewer)
+	#cleanup and arrange observed flow and climate trend data.
+	flow.trends = arrange.data(dat,response)
+	#create a colour gradient for the climate index values.
+	cols = color.gradient(flow.trends$std.clim, monthly = monthly, min = min, max = max)
+
+	########################################### plot raw data ##############################################
+
+	#set initial plotting parameters
+	par(mar = c(0,2.7,0.2,0), family = "serif", bg = "white",fg = "white", las = 1)
+	#determine axis labels.
+	axis.Fun(flow.trends, yaxis.doy, ylimit)
+	#plot initial blank region to be filled.
+	plot(slope~sqrt.resp, xlim = c(0,500), ylim = range(ylimits), xlab = "", ylab = "", axes = F, data = flow.trends)
+	#make plotting visible.
+	par(fg = "black")
+	#draw x and y axis.
+	axis.Draw(LW = l.width, ALS = axis.lab.size-0.3, ALY = axis.ly,
+						LL = lab.loc+0.6, YLim = ylimits, YLab = label, xAxis = xaxis, ALabS = axis.lab.size)
+	#add points and se to plotting region.
+	pointsSE(flow.trends, lcol, cols, l.width, ptsize = 0.75)
+	#create label for each panel.
+	text(500, mean(c(max(ylimits),ylimits[length(ylimits)-1])), labels = pane, pos = 2, cex = axis.lab.size)
+	mtext(funnel.y, side=2, at = 0.03, line=lab.loc, cex = axis.lab.size, las = 0)  #y-axis label.
+
+	###################################### plot variance parameter #########################################
+	#add real/simulation variance lines.
+	#subset simulation and real data trend datasets to be used as inputs.
+	sims = dat$Area$sim_varexp
+	real = dat$Area$real_varexp
+	rvarexp = real$varexp; sigma = real$sigma; intercept = real$intercept; slope = real$slope
+	#sample simulation lines to be plotted and break them into those above and below the real variance param.
+	sim.lines = sample_n(sims, iter) %>% plyr::arrange(.,.n)
+	ld.up = filter(sim.lines, varexp > rvarexp);	ld.low = filter(sim.lines, varexp < rvarexp)
+	#draw lines.
+	#less extreme values.
+	line.sims(df = ld.up, col = col1, LW = l.width, shade = "10",
+						intercept = intercept, slope = slope, sigma = sigma,
+						resp.sqrt = flow.trends$sqrt.resp)
+	#more extreme values.
+	line.sims(df = ld.low, col = col3, LW = l.width, shade = "10",
+						intercept = intercept, slope = slope, sigma = sigma,
+						resp.sqrt = flow.trends$sqrt.resp)
+	#actual values repeated twice.
+	for(i in c(1:2)) {
+		line.sims(df = real, col = col2, LW = l.width + 1.5, shade = "99",
+							intercept = intercept, slope = slope, sigma = sigma,
+							resp.sqrt = flow.trends$sqrt.resp)
+	}
+}
+
+maxminclim = function(dat){
+	tp = range(unlist(lapply(dat,function(x){
+		range(x$Area$real_slopes$std.clim)
+	})))
+	minc <<- tp[1]
+	maxc <<- tp[2]
+}
+
+
+load("max_month.rdata")
+maxminclim(out_max_month)
+pdf("fig4_max-monthly-density-funnel.pdf", width = 5.75, height = 4.75)
+monthlyScreen(IntExp = 7, Atten = 10)
+density_plot(out_max_month, "Area", type = "int", xlimit = c(-0.008,0.017))
+density_plot(out_max_month, "Area", type = "exp", xlimit = c(-12,4))
+funnel.plots(dat = out_max_month$`2`, response = "Area", yaxis.doy = F, xaxis = F, d.xaxis = F, pane = "February", axis.ly = NULL, ylimit = c(-0.03,0.025), iter = 500, monthly = T, min = minc, max = maxc)
+funnel.plots(dat = out_max_month$`5`, response = "Area", yaxis.doy = F, xaxis = F, d.xaxis = F, pane = "May", axis.ly = NULL, ylimit = c(-0.02,0.02), iter = 500, monthly = T, min = 0.0290354, max = 4.7576590)
+funnel.plots(dat = out_max_month$`8`, response = "Area", yaxis.doy = F, xaxis = F, d.xaxis = F, pane = "August", axis.ly = NULL, ylimit = c(-0.04,0.02), iter = 500, funnel.y = expression("Maximum-Flow | %Change"%.%"Decade"^-1), monthly = T, min = minc, max = maxc)
+funnel.plots(dat = out_max_month$`11`, response = "Area", yaxis.doy = F, xaxis = T, d.xaxis = F, pane = "November", axis.ly = NULL, ylimit = c(-0.02,0.04), iter = 500, monthly = T, min = minc, max = maxc)
+dev.off()
+
+load("min_month.rdata")
+#pdf("fig4_min-monthly-density-funnel.pdf", width = 11, height = 8.5)
+monthlyscreen()
+density_plot(out_min_month, "Area", type = "int", xlimit = c(-0.008,0.017))
+density_plot(out_min_month, "Area", type = "exp", xlimit = c(-12,4))
+funnel.plots(dat = out_min_month$`2`, response = "Area", yaxis.doy = F, xaxis = F, d.xaxis = F, pane = "February", axis.ly = NULL, ylimit = c(-0.03,0.025), iter = 500, monthly = T, min = minc, max = maxc)
+funnel.plots(dat = out_min_month$`5`, response = "Area", yaxis.doy = F, xaxis = F, d.xaxis = F, pane = "May", axis.ly = NULL, ylimit = c(-0.025,0.04), iter = 500, monthly = T, min = minc, max = maxc)
+funnel.plots(dat = out_min_month$`8`, response = "Area", yaxis.doy = F, xaxis = F, d.xaxis = F, pane = "August", axis.ly = NULL, ylimit = c(-0.025,0.03), iter = 500, funnel.y = expression("Minimum-Flow | %Change"%.%"Decade"^-1), monthly = T, min = minc, max = maxc)
+funnel.plots(dat = out_min_month$`11`, response = "area", yaxis.doy = F, xaxis = T, d.xaxis = F, pane = "November", axis.ly = NULL, ylimit = c(-0.02,0.04), iter = 500, monthly = T, min = minc, max = maxc)
+#dev.off()
+
+load("med_month.rdata")
+#pdf("fig4_med-monthly-density-funnel.pdf", width = 11, height = 8.5)
+monthlyscreen()
+density_plot(out_med_month, "Area", type = "int", xlimit = c(-0.008,0.017))
+density_plot(out_med_month, "Area", type = "exp", xlimit = c(-12,4))
+funnel.plots(dat = out_med_month$`2`, response = "Area", yaxis.doy = F, xaxis = F, d.xaxis = F, pane = "February", axis.ly = NULL, ylimit = c(-0.025,0.03), iter = 500, monthly = T, min = minc, max = maxc)
+funnel.plots(dat = out_med_month$`5`, response = "Area", yaxis.DOY = F, xAxis = F, d.xaxis = F, pane = "May", axis.Ly = NULL, ylimit = c(-0.025,0.04),  iter = 500, monthly = T, min = minC, max = maxC)
+funnel.plots(dat = out_med_month$`8`, response = "Area", yaxis.DOY = F, xAxis = F, d.xaxis = F, pane = "August", axis.Ly = NULL, ylimit = c(-0.025,0.03), iter = 500, funnel.y = expression("Medimum-Flow | %Change"%.%"Decade"^-1), monthly = T, min = minC, max = maxC)
+funnel.plots(dat = out_med_month$`11`, response = "Area", yaxis.DOY = F, xAxis = T, d.xaxis = F, pane = "November", axis.Ly = NULL, ylimit = c(-0.02,0.04), iter = 500, monthly = T, min = minC, max = maxC)
+#dev.off()
+```
+
+####Code block 6 - Attenuation Stats
+
+#Attenuation Stats.
+load("out_doy2.RData")
+load("out_med.RData")
+load("out_min.RData")
+load("out_max.RData")
+library(tidyverse)
+
+#This function finds the predicted attenuation values at any two catchment areas and returns the percent decrease in predicted range values when moving from small catchments to a large catchment.
+```{r}
+pred.F = function(x, Area){
+	prediction.1= x$real_varexp$slope*(sqrt(Area) - mean(sqrt(Area))) + 1.96 * sqrt(x$real_varexp$sigma^2 * exp(2*(sqrt(Area)/1e3)*x$real_varexp$varexp))
+	prediction.2= x$real_varexp$slope*(sqrt(Area) - mean(sqrt(Area))) - 1.96 * sqrt(x$real_varexp$sigma^2 * exp(2*(sqrt(Area)/1e3)*x$real_varexp$varexp))
+	percent.reduced = (1-sqrt(diff(c(prediction.1[2],prediction.2[2]))^2/diff(c(prediction.1[1],prediction.2[1]))^2))*100
+	data.frame(percent.reduced)}
+
+pred.F(out_max$Area,range(out_max$Area$real_slopes$Area))
+pred.F(out_min$Area,range(out_max$Area$real_slopes$Area))
+pred.F(out_med$Area,range(out_max$Area$real_slopes$Area))
+pred.F(out_doy2$Area,range(out_max$Area$real_slopes$Area))
+pred.F(out_med$Area,c(5000,60000))
+```
+
+#This function produces lower and upper range estimates for trend values among smaller catchments (Small_Area) and then at a larger catchment (Large_Area). Values are returned as the percent change per decade.
+```{r}
+pred.F2 = function(x){
+	upper = x$real_varexp$intercept + x$real_varexp$slope*(sqrt(x$real_slopes$Area) - mean(sqrt(x$real_slopes$Area))) + 1.96 * sqrt(x$real_varexp$sigma^2 * exp(2*(sqrt(x$real_slopes$Area)/1e3)*x$real_varexp$varexp))
+	upper.est = round((exp(sort(range(upper),decreasing = T)*10)-1)*100,2)
+
+	lower = x$real_varexp$intercept + x$real_varexp$slope*(sqrt(x$real_slopes$Area) - mean(sqrt(x$real_slopes$Area))) - 1.96 * sqrt(x$real_varexp$sigma^2 * exp(2*(sqrt(x$real_slopes$Area)/1e3)*x$real_varexp$varexp))
+	lower.est = round((exp(range(lower)*10)-1)*100,2)
+	data.frame(upper.est, lower.est, row.names = c("Small_Area", "Large_Area"))
+	}
+pred.F2(out_max$Area)
+pred.F2(out_min$Area)
+pred.F2(out_med$Area)
+```
+
+#     Determine the ratio of observed to null attenuation    #
+```{r}
+ratio_atten = function(varexp_real, varexp_null, area1, area2){
+	obs = sqrt(exp(2*sqrt(area1)/1e3*varexp_real)) / sqrt(exp(2*sqrt(area2)/1e3*varexp_real))
+	null = sqrt(exp(2*sqrt(area1)/1e3*varexp_null)) / sqrt(exp(2*sqrt(area2)/1e3*varexp_null))
+	print(quantile(obs / null, probs = c(0.05, 0.5, 0.95)) %>% round(1))
+	#par(mfrow = c(1,2)); plot(density(obs / null)); plot(density(log10(obs/null)))
+	#obs / null
+}
+
+Area_Small = min(out_med$Area$real_slopes$Area)
+#Area_Small = 5000
+Area_Large = max(out_med$Area$real_slopes$Area)
+#Area_Large = 60000
+expReal = out_med$Area$real_varexp$varexp
+expNull = out_med$Area$sim_varexp$varexp
+atten_compare = ratio_atten(expReal,expNull,Area_Small,Area_Large)
+```
+
+#Uncomment the last line of the ratio_atten function before plotting. Also, nice to comment out the print function and the plotting line for computational speed.  
+```{r}
+max_Areas = seq(10000,215000,length.out = 100)
+
+out = plyr::ldply(max_Areas, function(x){
+	ratio_atten(expReal,expNull,5000,x)
+}) %>% mutate(area = max_Areas)
+
+ggplot(out, aes(out[,4],out[,2])) +
+	geom_line() +
+	geom_point() +
+	geom_line(aes(out[,4],out[,1]),colour = "blue") +
+	geom_line(aes(out[,4],out[,3]),colour = "blue") +
+	xlab("Area") +
+	ylab("Ratio") +
+	theme_bw()
+	```
+
+#     Determine the DOY2 trends in human speak     #
+```{r}
+load("03_Data_Annual.RData")
+logit = function(p){log(p/(1-p))}
+Y.Data = plyr::ddply(Y.Data,"Station.ID",plyr::mutate, med.log.sd = scale(Median.F, center = F), max.log.sd = scale(Max.F, center = F), min.log.sd = scale(Min.F, center = F), DOY2.logit = logit(DOY2/365), Year.Center = Year-1988)
+```
+
+#function to predict doy to half annual flow given slope, intercept and year.
+```{r}
+logit.pred = function(slope, intercept, year.center){data.frame(pred.points = plogis(intercept+slope*year.center))}
+```
+
+#expand the slope/intercept data so each site has a row for each year.
+```{r}
+new.dat = expand.grid(Station.ID = out_doy2$Area$real_slopes$Station.ID, year.center = sort(unique(Y.Data$Year.Center))) %>% inner_join(out_doy2$Area$real_slopes)
+```
+
+#apply the logit.pred function to the new.dat dataframe.
+```{r}
+for.plot = plyr::mdply(select(new.dat, intercept, slope, year.center), logit.pred)
+```
+
+#add the station.id to the predicted data.
+```{r}
+for.plot = data.frame(for.plot, station.id = new.dat$Station.ID)
+```
+
+#plot the predicted doy to half annual flow over time for each site.
+```{r}
+ggplot(for.plot, aes(year.center, pred.points*365, group = station.id))+
+	geom_line(alpha = 0.2) +
+	theme_classic()
+```
+
+#isolate the doy gls coefficients.
+```{r}
+varexp = out_doy2$Area$real_varexp$varexp
+sigma = out_doy2$Area$real_varexp$sigma
+slope = out_doy2$Area$real_varexp$slope
+intercept = out_doy2$Area$real_varexp$intercept
+area = sort(unique(Y.Data$Area))
+```
+
+#predict slope function
+```{r}
+doy.slope.pred  = function(intercept, slope, area, sigma, varexp){
+	data.frame(slope.upper = (intercept + slope * (sqrt(area)-mean(sqrt(area))) + 1.96 * sqrt(sigma^2 * exp(2*(sqrt(area)/1e3)*varexp))), slope.lower = (intercept + slope * (sqrt(area)-mean(sqrt(area))) - 1.96 * sqrt(sigma^2 * exp(2*(sqrt(area)/1e3)*varexp))))
+}
+
+pred.slopes = doy.slope.pred(intercept, slope, range(area), sigma, varexp)
+
+##### Updated upstream
+get_2decade_change <- function(m) (plogis(m*19)-plogis(m*-18))*365
+
+
+##### Stashed changes
+
+m <- median(out_doy2$Area$real_slopes$slope)
+get_2decade_change(m)
+
+m <- max(out_doy2$Area$real_slopes$slope)
+get_2decade_change(m)
+
+m <- min(out_doy2$Area$real_slopes$slope)
+get_2decade_change(m)
+
+get_2decade_change(pred.slopes$slope.upper)
+pred.slopes$slope.upper/4*38*365
+
+get_2decade_change(pred.slopes$slope.lower)
+pred.slopes$slope.lower/4*38*365
+
+
+
+load("max_month.RData")
+load("min_month.RData")
+load("med_month.RData")
+#Determine the regional flow trend for the entire Fraser Basin.
+round(exp(out_max_month$`3`$Area$real_varexp$intercept*10)*100-100,0)
+```
+
+####Code block 7 - Area Climate Portfolio Plot
+
+```{r}
+load("out_med.RData")
+library(MASS);library(tidyverse); library(attenPlot);
+df = out_med$Area$real_slopes
+df = df %>% mutate(logArea = log(Area), sqrtArea = sqrt(Area), cols = "#000000", loc = "interior")
+```
+
+#Model to add line to plot.
+```{r}
+remove = c("08MH006","08MH076")
+#"08MH090","08MH056","08LG016","08LG048","08MH103","08MH001","08MH016","08MH029"
+df$cols[which(df$Station.ID%in%remove)] = "#969696"
+df$loc[which(df$Station.ID%in%remove)] = "coastal"
+ggplot(df,aes(exp(std.clim), slope, color = cols)) + geom_point()
+```
+
+#Look at each climate variable and the index against area.
+```{r}
+gather(data = df, key = "climateIndex", value = "IndexValue", emt.sd, ext.sd, map.sd, mat.sd, pas.sd, std.clim) %>%
+	ggplot(., aes(logArea, IndexValue, label = Station.ID)) + geom_text(check_overlap = T) + geom_point(aes(color = cols)) + facet_wrap(~climateIndex, scales = "free_y") + theme(legend.position="none")
+	```
+
+#Model with weighted regresssion to downweight outliers/leverage points.
+```{r}
+mod1 = rlm(std.clim~logArea, data = df)
+se = summary(mod1)[[4]][4]
+int = summary(mod1)[[4]][1]
+slope = summary(mod1)[[4]][2]
+
+sim = log(seq(100,250000,by = 100))
+preds = int + sim*slope
+se_upper = preds + (2*se)
+se_lower = preds - (2*se)
+preds = data.frame(area = exp(sim), preds = preds, se_upper = se_upper, se_lower = se_lower)
+#par(mar = c(0,0.3,1.5,0.5), mgp = c(2,0.60,0))
+wdth = 8.7/2.54; hght = wdth*0.6
+pdf("Fig2_ClimPort.pdf", width = wdth, height = hght)
+
+LW = 1; ALS = 0.7; LL = 1.2
+par(oma = c(2,0,0,0), mar = c(0,1.8,0.2,0), family = "serif", bg = "white", fg = "white", mgp = c(2,0.2,0))
+plot(std.clim~sqrtArea, data = df, xlab = "", ylab = "", axes = F, xlim = c(0,sqrt(250000)), ylim = c(0,4))
+par(fg = "black")
+axis(1, lwd = LW, cex.axis = ALS, outer = T, hadj = 1,
+		 labels = c("0", "10000", "40000", "90000", "160000", "250000"), at = c(0, 100, 200, 300, 400, 500))
+mtext(expression("Area (km"^2 * ")"), side = 1, line = LL, cex = ALS)
+par(mgp = c(2,0.6,0))
+axis(2, lwd = LW, cex.axis = ALS, las = 1)
+mtext("Climate Variability Index", side = 2, line = LL, cex = ALS, las = 0)
+points(df$sqrtArea, df$std.clim, pch = 16, cex = 0.9, col = "#000000")
+
+#lines(sqrt(preds$area), preds$preds, col = "black")
+#upper = data.frame(se = preds$se_upper, area = sqrt(preds$area))
+#lower = data.frame(se = preds$se_lower, area = sqrt(preds$area)) %>% arrange(desc(area))
+#poly = bind_rows(upper,lower) %>% dplyr::select(area, se)
+#polygon(poly, col = "#96969699", lty = 1, border = NA)
+
+dev.off()
+```
+
+####Code block 8 - Supplementary Plots
+
+#supplementary plots
+```{r}
+library(tidyverse);library(attenPlot);library(RColorBrewer);library(lme4);library(zoo);library(lubridate)
+load("05_MonthDat_ClimForest.RData")
+load("05_AnnualDat_ClimForest.RData")
+```
+
+#S1
+```{r}
+ggplot(Y.Data, aes(Year, Median.F, color = p5Harvest*100)) + geom_point() +
+	facet_wrap(~Station.ID, scales = "free") + geom_smooth(method = "lm") +
+	scale_color_gradient2(name = expression(frac("%Harvest","5-Year")), midpoint=5, low="#67A9CF", mid="#F2F2F2",
+												high="#FF0000", space ="Lab") +
+	scale_x_continuous(name="Year", limits=c(1970, 2007), breaks = c(1970,1988,2007)) +
+	ylab(label = expression("Median Annual Flow (m"^3%.%"sec"^-1~")")) +
+	theme_classic(base_size = 9) +
+	theme(plot.margin = unit(c(0.1,0.1,0.1,0.1), "cm"))
+folder = "~/sfuvault/Simon_Fraser_University/PhD_Research/Projects/River-Network-Flow-Trends/drafts/AGU_Journal/submission\ 2/"
+ggsave(paste(folder,"FigS1_SiteLogModels.pdf", sep = ""), width = 11, height = 7.5)
+```
+
+#S2
+```{r}
+ggplot(M.Data, aes(p5Harvest*100, log(med.log.sd))) + geom_point(alpha = 0.5) +
+	facet_wrap(~Month, scales = "free") +
+	geom_smooth(aes(group = Station.ID, color = Station.ID), method ="lm", se = F) +
+	ylab(label = expression("log"["e"]~"Scaled Median Flow (m"^3%.%"sec"^-1*")"%.%"year"^-1)) +
+	xlab(expression("%Harvest"%.%"5-Year"^-1)) +
+	theme_classic(base_size = 9) +
+	theme(plot.margin = unit(c(0.1,0.1,0.1,0.1), "cm"), legend.position = "none")
+ggsave(paste(folder,"FigS2_SiteMonthLogModels.pdf", sep = ""), width = 11, height = 7.5)
+```
+
+#S3
+```{r}
+MmodGH = glmer(formula = med.log.sd~pHarvest+(1|Station.ID), family = Gamma(link = "log"), data = Y.Data)
+temp = bind_cols(Y.Data, data.frame(fixed = predict(MmodGH, Y.Data)))
+ggplot(temp, aes(pHarvest*100, log(as.numeric(med.log.sd)), color = Station.ID)) + geom_point(alpha = 0.5) +
+	geom_line(aes(pHarvest*100, fixed), color = "black") + #geom_line(aes(pHarvest, random, color = Station.ID)) +
+	ylab(label = expression("log"["e"]~"Scaled Median Flow (m"^3%.%"sec"^-1*")"%.%"year"^-1)) +
+	xlab(expression("%Harvest"%.%"5-Year"^-1)) +
+	theme_classic(base_size = 9) +
+	theme(plot.margin = unit(c(0.1,0.1,0.1,0.1), "cm"), legend.position = "none")
+ggsave(paste(folder,"FigS3_GlobalLogModel.pdf", sep = ""), width = 7, height = 4)
+```
+
+#S8
+```{r}
+ggplot(Y.Data, aes(Year, p5Harvest*100, color = Area)) + geom_jitter(alpha = 0.5) +
+	geom_smooth(aes(Year, p5Harvest*100, group = Station.ID), se = F) +
+	scale_color_continuous(low = "#DEEBF7", high = "#2171B5", trans = "log",
+												 name = expression("Area (km"^2~")"),
+												 breaks = c(400, 8000, 150000), labels = c("400", "8000", "150000")) +
+	ylab(expression("%Harvest"%.%"5-Year"^-1)) +
+	theme_classic(base_size = 9) +
+	theme(plot.margin = unit(c(0.1,0.1,0.1,0.1), "cm"))
+ggsave(paste(folder,"FigS8_HarvestYear.pdf", sep = ""), width = 10, height = 5.5)
+```
+
+#S4
+```{r}
+load("out_med.RData")
+load("03_Data_Annual.RData")
+logit = function(p){log(p/(1-p))}
+Y.Data = plyr::ddply(Y.Data,"Station.ID",plyr::mutate, med.log.sd = scale(Median.F, center = F), max.log.sd = scale(Max.F, center = F), min.log.sd = scale(Min.F, center = F), DOY2.logit = logit(DOY2/365), Year.Center = Year-1988)
+
+dat_sim = out_med$Area$example_ts; names(dat_sim)[2] = "Year.Center"
+dat = dplyr::left_join(dat_sim, Y.Data, by = c("Station.ID", "Year.Center"))
+Adjuster = Y.Data %>%
+	group_by(Station.ID) %>%
+	summarise(adjust = sqrt(mean(Median.F^2)))
+
+dat = dplyr::left_join(Adjuster, dat, by = "Station.ID")
+dat = dat %>% mutate(med_sim_unscale = exp(y)*adjust)
+
+ggplot(dat, aes(Year, med_sim_unscale)) +
+	geom_line(colour = "#F2AD00") +
+	geom_line(aes(Year.Center + 1988, Median.F), colour = "#67A9CF", alpha = 0.5) +
+	facet_wrap(~Station.ID, scales = "free_y") +
+	theme_classic(base_size = 9) +
+	annotate("segment", x=-Inf, xend=Inf, y=-Inf, yend=-Inf)+
+	annotate("segment", x=-Inf, xend=-Inf, y=-Inf, yend=Inf) +
+	theme(plot.margin = unit(c(0.1,0.1,0.1,0.1), "cm")) +
+	labs(x = "Year", y = expression("Simulated & Observed Annual Median-Flow (m"^3%.%"sec"^-1*")"%.%"year"^-1))
+
+ggsave(paste(folder,"FigS4_SiteSim.pdf", sep = ""), width = 11, height = 7.5)
+```
+
+#S5
+#clean up NA's in simulated data where no observed data existed.
+```{r}
+dat$Area = apply(dat, 1, function(x){
+	#browser()
+	if(is.na(x["Area"])){
+		as.numeric(na.omit(unique(dat[which(dat$Station.ID==x["Station.ID"]),"Area"])))
+	} else as.numeric(x["Area"])
+})
+```
+
+# this function fits slopes to real data
+```{r}
+fit_slopes <- function(flow.dat, response) {
+	area_dat <- na.omit(unique(flow.dat[,c("Station.ID", "Area")]))
+	equation <- as.formula(paste(response,"~Year.Center"))
+	models <- plyr::ddply(flow.dat,"Station.ID", function(x){
+		#browser()
+		library(nlme)
+		mod <- gls(equation, correlation = corAR1(), data = x)
+		slope <- coef(mod)[[2]]
+		intercept <- coef(mod)[[1]]
+		se <- summary(mod)$tTable[2,2]
+		sigma <- mod$sigma
+		phi <- coef(mod$model[[1]], unconstrained = F)[[1]]
+		data.frame(intercept,slope,se,sigma,phi)
+	})
+	models <- plyr::join(models,area_dat, by = "Station.ID")
+	models
+}
+sim_out = fit_slopes(dat, "y")
+m = gls(slope~sqrt(Area), data = sim_out, weights = varExp(form= ~sqrt(Area)/1e3),
+							control = glsControl(maxIter = 1000L, msMaxIter = 1000L))
+varexp <- m$model[[1]][[1]]; sigma <- m$sigma; intercept <- coef(m)[[1]]; slope = m$coefficients[[2]]; sim_varexp = data.frame(varexp, sigma, intercept, slope)
+
+rInt = out_med$Area$real_varexp$intercept
+rSlope = out_med$Area$real_varexp$slope
+rSigma = out_med$Area$real_varexp$sigma
+rVarexp = out_med$Area$real_varexp$varexp
+
+var_upper = rInt + rSlope*(sqrt(sim_out$Area) - mean(sqrt(sim_out$Area))) + 1.96 * sqrt(rSigma^2 * exp(2*(sqrt(sim_out$Area)/1e3)*sim_varexp$varexp))
+var_lower = rInt + rSlope*(sqrt(sim_out$Area) - mean(sqrt(sim_out$Area))) - 1.96 * sqrt(rSigma^2 * exp(2*(sqrt(sim_out$Area)/1e3)*sim_varexp$varexp))
+sim_out = sim_out %>% mutate(label = rep('sim',nrow(sim_out)), var_upper, var_lower)
+
+var_upper = rInt + rSlope*(sqrt(sim_out$Area) - mean(sqrt(sim_out$Area))) + 1.96 * sqrt(rSigma^2 * exp(2*(sqrt(sim_out$Area)/1e3)*rVarexp))
+var_lower = rInt + rSlope*(sqrt(sim_out$Area) - mean(sqrt(sim_out$Area))) - 1.96 * sqrt(rSigma^2 * exp(2*(sqrt(sim_out$Area)/1e3)*rVarexp))
+real_out = out_med$Area$real_slopes %>% mutate(label = rep('real',nrow(out_med$Area$real_slopes)), var_upper, var_lower)
+
+final = bind_rows(sim_out, real_out)
+
+labels.y = c(-0.01,0,0.01,0.02)
+label.y = round(exp(labels.y*10)*100-100,0)
+
+ggplot(final, aes(sqrt(Area), slope, colour = label)) +
+	geom_point() +
+	geom_smooth(aes(sqrt(Area), var_upper)) +
+	geom_smooth(aes(sqrt(Area), var_lower)) +
+	scale_color_manual(values=c("#67A9CF", "#F2AD00"), guide = F) +
+	scale_x_continuous(breaks = c(0, 100, 200, 300, 400), labels = as.character(c(0, 100^2, 200^2, 300^2, 400^2))) +
+	scale_y_continuous(breaks = labels.y, labels = as.character(label.y)) +
+	theme_classic(base_size = 9) +
+	geom_errorbar(aes(ymax = slope + se, ymin=slope - se, colour = label)) +
+	annotate("segment", x=-Inf, xend=Inf, y=-Inf, yend=-Inf)+
+	annotate("segment", x=-Inf, xend=-Inf, y=-Inf, yend=Inf) +
+	theme(plot.margin = unit(c(0.1,0.1,0.1,0.1), "cm")) +
+	labs(y = expression("Median-Flow | %Change"%.%"Decade"^-1), x = expression("Area (km"^2*")"))
+
+ggsave(paste(folder,"FigS5_BasinSim.pdf", sep = ""), width = 11, height = 7.5)
+```
+
+#S9
+#Load Data
+```{r}
+load("02b_Missing_Data_Predictions.RData")
+```
+
+#Calculate Rolling Average to smooth out daily extremes.
+```{r}
+flow.stats = Data.Preds %>% group_by(Station.ID) %>%
+	arrange(Date) %>%
+	do({
+		z = zoo(.$Flow.Data, .$Date)
+		x = rollapply(data = z, width = 5, by = 1, FUN = mean)
+		data.frame(Date = index(x), mean5day = coredata(x))
+	})
+Data.Preds = Data.Preds %>% left_join(., flow.stats, by  = c("Station.ID", "Date"))
+
+coast = c("08MH006","08MH029","08MH076","08MH090")
+Data.Preds = Data.Preds %>% mutate(DOYAdj = if_else(Station.ID %in% coast, yday(ymd(Date)+200), yday(Date)))
+
+colourCount = length(unique(Data.Preds$Year))
+getPalette = colorRampPalette(brewer.pal(11, "RdYlBu"))
+```
+
+#Change DOY to DOYAdj for adjusted DOY for coastal sites.
+```{r}
+ggplot(Data.Preds) +
+	geom_smooth(aes(DOY, mean5day, group = Year, color = Year), se = F) +
+	scale_color_gradientn(colours = getPalette(colourCount)) +
+	labs(y = expression("Flow (m"^3%.%"s"^-1*")"), x = "Day of Year") +
+	theme_classic(base_size = 9) +
+	facet_wrap(~Station.ID, scales = "free")
+
+ggsave(paste(folder,"FigS9_FlowCurvesRaw.pdf", sep = ""), width = 11, height = 7.5)
+```
