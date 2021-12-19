@@ -1,8 +1,13 @@
 # Title of Study
 
-> Insert names of the original authors in Kedron, P.J. format
+River networks dampen long-term hydrological signals of climate change
+K. A. Chezik,S. C. Anderson,J. W. Moore
+
+Reformatting by Castin Stone
 
 ## Abstract
+
+
 
 > Briefly describe the study. If the study is a reproduction or replication, the full citation of the original study should be included here with digital object identifier (DOI) to the study and, if applicable, any preregistration, code or data repositories. Delete this instruction from the final repository.
 
